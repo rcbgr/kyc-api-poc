@@ -1,0 +1,4 @@
+
+Contains Apache 2 source from:
+
+https://github.com/aws-samples/startup-kit-templates/blob/master/templates/vpc.cfn.yml

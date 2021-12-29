@@ -1,0 +1,160 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: KYC API POC
+
+Parameters:
+
+  AvailabilityZone0:
+    Type: AWS::EC2::AvailabilityZone::Name
+    ConstraintDescription: Must be a valid availability zone
+
+  AvailabilityZone1:
+    Type: AWS::EC2::AvailabilityZone::Name
+    ConstraintDescription: Must be a valid availability zone
+
+  EnvName:
+    Type: String
+    Description: Environment name
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    ConstraintDescription: Specify either dev or prod environment
+
+
+Mappings:
+
+  CidrMap:
+    Vpc:
+      Cidr: 10.50.0.0/16
+    Public0:
+      Cidr: 10.50.0.0/24
+    Public1:
+      Cidr: 10.50.1.0/24
+    Private0:
+      Cidr: 10.50.64.0/19
+    Private1:
+      Cidr: 10.50.96.0/19
+
+
+Resources:
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [ CidrMap, Vpc, Cidr ]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref AWS::StackName
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  PrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !FindInMap [ CidrMap, Private0, Cidr ]
+      AvailabilityZone: !Ref AvailabilityZone0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet0
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !FindInMap [ CidrMap, Private1, Cidr ]
+      AvailabilityZone: !Ref AvailabilityZone1
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PrivateSubnet1
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  PublicSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !FindInMap [ CidrMap, Public0, Cidr ]
+      AvailabilityZone: !Ref AvailabilityZone0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnet0
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !FindInMap [ CidrMap, Public1, Cidr ]
+      AvailabilityZone: !Ref AvailabilityZone1
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-PublicSubnet1
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-igw
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-igw
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation0:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet0
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetNetworkAclAssociation0:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet0
+      NetworkAclId: !GetAtt Vpc.DefaultNetworkAcl
+
+  PublicSubnetNetworkAclAssociation1:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      NetworkAclId: !GetAtt Vpc.DefaultNetworkAcl
+
+

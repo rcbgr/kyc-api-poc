@@ -13,6 +13,12 @@ Parameters:
     Type: AWS::EC2::AvailabilityZone::Name
     ConstraintDescription: Must be a valid availability zone
 
+  CertificateArn:
+    Type: String
+    Description: The TLS certificate ARN
+    MinLength: 20
+    MaxLength: 2048
+
   EnvName:
     Type: String
     Description: Environment name
@@ -21,6 +27,9 @@ Parameters:
       - dev
       - prod
     ConstraintDescription: Specify either dev or prod environment
+
+  ServiceImage:
+    Type: String
 
 
 Mappings:
@@ -115,6 +124,40 @@ Resources:
       VpcId: !Ref Vpc
       InternetGatewayId: !Ref InternetGateway
 
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-private-rt
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  PrivateSubnetRouteTableAssociation0:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet0
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetNetworkAclAssociation0:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet0
+      NetworkAclId: !GetAtt Vpc.DefaultNetworkAcl
+
+  PrivateSubnetNetworkAclAssociation1:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      NetworkAclId: !GetAtt Vpc.DefaultNetworkAcl
+
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -157,4 +200,381 @@ Resources:
       SubnetId: !Ref PublicSubnet1
       NetworkAclId: !GetAtt Vpc.DefaultNetworkAcl
 
+  EcrRepoistory:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref AWS::StackName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: !Ref AWS::StackName
+          Image: !Ref ServiceImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8443
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ddb-ky-table-write
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:Put*
+                  - dynamodb:BatchWrite*
+                  - dynamodb:Update*
+                Resource: !GetAtt KyTable.Arn
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref EcsCluster
+      ServiceName: !Ref AWS::StackName
+      DesiredCount: 2
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerName: !Ref AWS::StackName
+          ContainerPort: 8443
+          TargetGroupArn: !Ref TargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt ServiceSg.GroupId
+          Subnets:
+            - !Ref PrivateSubnet0
+            - !Ref PrivateSubnet1
+    DependsOn:
+      - EcrDockerVpcEndpoint
+      - EcrApiVpcEndpoint
+      - S3VpcEndpoint
+
+  KyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      KinesisStreamSpecification:
+        StreamArn: !GetAtt KyDataStream.Arn
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: TenantId
+          AttributeType: S
+        - AttributeName: EntityId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: TenantId
+          KeyType: HASH
+        - AttributeName: EntityId # A#EntityId#U || A#EntityId#T#TransactionId
+          KeyType: RANGE
+      Tags:
+        - Key: Data
+          Value: Red
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  KyDataStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      StreamModeDetails:
+        StreamMode: ON_DEMAND
+      RetentionPeriodHours: 8760 # 365 day
+      StreamEncryption:
+        EncryptionType: KMS
+        KeyId: alias/aws/kinesis
+      Tags:
+        - Key: Data
+          Value: Red
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      Subnets:
+        - !Ref PublicSubnet0
+        - !Ref PublicSubnet1
+      SecurityGroups:
+        - !GetAtt AlbSg.GroupId
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: true
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: true
+        - Key: routing.http2.enabled
+          Value: true
+        - Key: routing.http.x_amzn_tls_version_and_cipher_suite.enabled
+          Value: true
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  AlbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      SslPolicy: ELBSecurityPolicy-TLS-1-2-Ext-2018-06
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref Vpc
+      Port: 8443
+      Protocol: HTTPS
+      Matcher:
+        HttpCode: 200
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTPS
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 120
+      TargetType: ip
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  GlobalAccelerator:
+    Type: AWS::GlobalAccelerator::Accelerator
+    Properties:
+      Name: !Ref AWS::StackName
+      Enabled: true
+      IpAddressType: IPV4
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  GlobalAcceleratorListener:
+    Type: AWS::GlobalAccelerator::Listener
+    Properties:
+      AcceleratorArn: !Ref GlobalAccelerator
+      ClientAffinity: SOURCE_IP
+      PortRanges:
+        - FromPort: 443
+          ToPort: 443
+      Protocol: TCP
+
+  GlobalAcceleratorEndpointGroup:
+    Type: AWS::GlobalAccelerator::EndpointGroup
+    Properties:
+      EndpointGroupRegion: !Ref AWS::Region
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPort: 443
+      HealthCheckProtocol: TCP
+      ListenerArn: !Ref GlobalAcceleratorListener
+      ThresholdCount: 3
+      TrafficDialPercentage: 100
+      EndpointConfigurations:
+        - ClientIPPreservationEnabled: true
+          EndpointId: !Ref Alb
+
+  AlbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Alb Security Group
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          ToPort: 443
+          FromPort: 443
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  AlbSgToServiceEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSg
+      IpProtocol: tcp
+      ToPort: 8443
+      FromPort: 8443
+      DestinationSecurityGroupId: !Ref ServiceSg
+
+  ServiceSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Service Security Group
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref AlbSg
+          IpProtocol: tcp
+          ToPort: 8443
+          FromPort: 8443
+      Tags:
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  # Add the VPC endpoint for ECS and ECR
+
+  EcrApiVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref EcrApiVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      SubnetIds:
+        - !Ref PrivateSubnet0
+        - !Ref PrivateSubnet1
+      VpcEndpointType: Interface
+      VpcId: !Ref Vpc
+
+  EcrDockerVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref EcrDockerVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      SubnetIds:
+        - !Ref PrivateSubnet0
+        - !Ref PrivateSubnet1
+      VpcEndpointType: Interface
+      VpcId: !Ref Vpc
+
+  EcrApiVpcEndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of ECR API VPC Endpoint
+      SecurityGroupIngress:
+        - CidrIp: !FindInMap [ CidrMap, Vpc, Cidr ]
+          Description: Allow all inbound traffic by default
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+      VpcId: !Ref Vpc
+
+  EcrDockerVpcEndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of ECR Docker VPC Endpoint
+      SecurityGroupIngress:
+        - CidrIp: !FindInMap [ CidrMap, Vpc, Cidr ]
+          Description: Allow all inbound traffic by default
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+      VpcId: !Ref Vpc
+
+  DynamoDbVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      VpcId: !Ref Vpc
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:DescribeTable
+              - dynamodb:Put*
+              - dynamodb:BatchWrite*
+              - dynamodb:Update*
+            Resource: !GetAtt KyTable.Arn
+            Principal: '*'
+            Condition:
+              StringEquals:
+                aws:PrincipalAccount: !Ref AWS::AccountId
+
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcId: !Ref Vpc
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub arn:${AWS::Partition}:s3:::prod-${AWS::Region}-starport-layer-bucket/*
+            Principal: '*'
 

@@ -31,6 +31,10 @@ update-stack:
   --template-body file://infra/poc.cfn.yml \
 	--parameters file://infra/poc.json
 
+.PHONY: build
+build:
+	@docker build -t kyc-api-poc-$(ENV_NAME) .
+
 .PHONY: update-service
 update-service:
 	aws ecr get-login-password \
@@ -39,6 +43,7 @@ update-service:
 	| docker login --username AWS --password-stdin $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com
 	@docker build -t kyc-api-poc-$(ENV_NAME) .
 	@docker tag kyc-api-poc-$(ENV_NAME):latest $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/kyc-api-poc-$(ENV_NAME):latest
+	@docker push $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/kyc-api-poc-$(ENV_NAME):latest
 	@aws ecs update-service \
 	--profile $(PROFILE) \
 	--region $(REGION) \

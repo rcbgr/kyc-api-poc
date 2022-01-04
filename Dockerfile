@@ -4,6 +4,7 @@ RUN mkdir -p /build
 WORKDIR /build
 COPY main.go .
 COPY go.mod .
+COPY go.sum .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
 RUN openssl genrsa -out server.key 2048

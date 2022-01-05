@@ -35,6 +35,7 @@ type KycResponse struct {
 
 type Kyc struct {
 	UserId      string   `json:"userId"`
+	TenantId 		string   `json:"tenantId"`
 	FirstName   string   `json:"firstName"`
 	LastName    string   `json:"lastName"`
 	DateOfBirth string   `json:"dateOfBirth"` // ISO 8601
@@ -110,6 +111,8 @@ func kycHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kyc.TenantId = tenantId
+
 	if err := putKycItem(context.TODO(), ddb, tenantId, &kyc); err != nil {
 		fmt.Printf("putKycItem failed - requestId: %s - err: %v\n", requestId, err)
 		w.WriteHeader(http.StatusBadGateway)
@@ -167,7 +170,7 @@ func main() {
 
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "These aren't the droids you're looking for\n")
+		io.WriteString(w, "These aren't the droids you're looking for...\n")
 	})
 
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -249,6 +252,7 @@ func putKycItem(
 		Item: map[string]types.AttributeValue{
 			"ShardId":    &types.AttributeValueMemberS{Value: shardId},
 			"EntityId":   &types.AttributeValueMemberS{Value: fmt.Sprintf("A#%s#U", kyc.UserId)},
+			"TenantId":   &types.AttributeValueMemberS{Value: kyc.TenantId},
 			"UserId":     &types.AttributeValueMemberS{Value: kyc.UserId},
 			"FirstName":  &types.AttributeValueMemberS{Value: kyc.FirstName},
 			"LastName":   &types.AttributeValueMemberS{Value: kyc.LastName},

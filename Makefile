@@ -8,7 +8,7 @@ ACCOUNT_ID := $(shell aws sts get-caller-identity --profile $(PROFILE) --query '
 create-stack:
 	@aws cloudformation create-stack \
   --profile $(PROFILE) \
-  --stack-name kyc-api-poc-$(ENV_NAME) \
+  --stack-name ky-ingestion-poc-$(ENV_NAME) \
   --region $(REGION) \
   --capabilities CAPABILITY_NAMED_IAM \
   --template-body file://infra/poc.cfn.yml \
@@ -18,14 +18,14 @@ create-stack:
 delete-stack:
 	@aws cloudformation delete-stack \
   --profile $(PROFILE) \
-  --stack-name kyc-api-poc-$(ENV_NAME) \
+  --stack-name ky-ingestion-poc-$(ENV_NAME) \
   --region $(REGION)
 
 .PHONY: update-stack
 update-stack:
 	@aws cloudformation update-stack \
   --profile $(PROFILE) \
-  --stack-name kyc-api-poc-$(ENV_NAME) \
+  --stack-name ky-ingestion-poc-$(ENV_NAME) \
   --region $(REGION) \
   --capabilities CAPABILITY_NAMED_IAM \
   --template-body file://infra/poc.cfn.yml \
@@ -33,7 +33,7 @@ update-stack:
 
 .PHONY: build
 build:
-	@docker build -t kyc-api-poc-$(ENV_NAME) .
+	@docker build -t ky-ingestion-poc-$(ENV_NAME) .
 
 .PHONY: update-service
 update-service:
@@ -41,13 +41,13 @@ update-service:
 	--profile $(PROFILE) \
 	--region $(REGION) \
 	| docker login --username AWS --password-stdin $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com
-	@docker build -t kyc-api-poc-$(ENV_NAME) .
-	@docker tag kyc-api-poc-$(ENV_NAME):latest $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/kyc-api-poc-$(ENV_NAME):latest
-	@docker push $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/kyc-api-poc-$(ENV_NAME):latest
+	@docker build -t ky-ingestion-poc-$(ENV_NAME) .
+	@docker tag ky-ingestion-poc-$(ENV_NAME):latest $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/ky-ingestion-poc-$(ENV_NAME):latest
+	@docker push $(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/ky-ingestion-poc-$(ENV_NAME):latest
 	@aws ecs update-service \
 	--profile $(PROFILE) \
 	--region $(REGION) \
-	--cluster kyc-api-poc-$(ENV_NAME) \
-	--service kyc-api-poc-$(ENV_NAME) \
+	--service ky-api-poc-$(ENV_NAME) \
+	--service ky-ingestion-poc-$(ENV_NAME) \
 	--force-new-deployment
 

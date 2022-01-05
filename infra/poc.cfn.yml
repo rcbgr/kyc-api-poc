@@ -31,6 +31,12 @@ Parameters:
   ServiceImage:
     Type: String
 
+  S3PrefixListId:
+    Type: String
+
+  DynamoDbPrefixListId:
+    Type: String
+
 
 Mappings:
 
@@ -46,6 +52,13 @@ Mappings:
     Private1:
       Cidr: 10.50.96.0/19
 
+  # This is a temp facility - another key / credential service should
+  # be created
+  TenantKeys:
+    Tenant0:
+      KeyId: 15e8ab60-6e3a11ec90d60242ac120003
+    Tenant1:
+      KeyId: 2e592b34-6e3a11ec90d60242ac120003
 
 Resources:
 
@@ -226,6 +239,12 @@ Resources:
         - Key: EnvName
           Value: !Ref EnvName
 
+  ServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /${AWS::StackName}/ky-ingestion
+      RetentionInDays: 30
+
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -248,7 +267,12 @@ Resources:
               Value: !Ref EnvName
             - Name: KYC_TABLE
               Value: !Ref KyTable
-
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref ServiceLogGroup
+              awslogs-stream-prefix: !Ref EnvName
 
   TaskRole:
     Type: AWS::IAM::Role
@@ -273,6 +297,12 @@ Resources:
                   - dynamodb:BatchWrite*
                   - dynamodb:Update*
                 Resource: !GetAtt KyTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt ServiceLogGroup.Arn
+
       Tags:
         - Key: EnvName
           Value: !Ref EnvName
@@ -318,6 +348,7 @@ Resources:
       - EcrDockerVpcEndpoint
       - EcrApiVpcEndpoint
       - S3VpcEndpoint
+      - CloudWatchLogsVpcEndpoint
 
   KyTable:
     Type: AWS::DynamoDB::Table
@@ -420,6 +451,7 @@ Resources:
       Tags:
         - Key: EnvName
           Value: !Ref EnvName
+    DependsOn: Alb
 
   GlobalAccelerator:
     Type: AWS::GlobalAccelerator::Accelerator
@@ -492,7 +524,134 @@ Resources:
         - Key: EnvName
           Value: !Ref EnvName
 
-  # Add the VPC endpoint for ECS and ECR
+  ServiceSgToS3Egress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      DestinationPrefixListId: !Ref S3PrefixListId
+
+  ServiceSgToDynamoDbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      DestinationPrefixListId: !Ref DynamoDbPrefixListId
+
+  ServiceSgToKmsVpcEndpointEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      DestinationSecurityGroupId: !Ref KmsVpcEndpointSg
+
+  ServiceSgToEcrDockerVpcEndpointSgEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      DestinationSecurityGroupId: !Ref EcrDockerVpcEndpointSg
+
+  ServiceSgToEcrApiVpcEndpointSgEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      DestinationSecurityGroupId: !Ref EcrApiVpcEndpointSg
+
+  ServiceSgToCloudWatchLogsVpcEndpointEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      DestinationSecurityGroupId: !Ref CloudWatchLogsVpcEndpointSg
+
+  # Temporary facility until a key/credential service is available/identified
+  Tenant0Key:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Tenant0 Key
+      Enabled: true
+      EnableKeyRotation: false
+      KeySpec: RSA_4096
+      KeyUsage: ENCRYPT_DECRYPT
+      MultiRegion: false
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: key-encrypt-1
+        Statement:
+          - Sid: Root Permission
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: '*'
+          - Sid: Dev CFN Permission
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:user/cb-temp # Used for development/testing
+            Action: kms:*
+            Resource: '*'
+          - Sid: Encrypt Permission
+            Effect: Allow
+            Principal:
+              AWS: !Sub GetAtt TaskRole.Arn
+            Action:
+              - kms:DescribeKey
+              - kms:GetPublicKey
+            Resource: '*'
+      Tags:
+        - Key: Data
+          Value: Red
+        - Key: EnvName
+          Value: !Ref EnvName
+
+  CloudWatchLogsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: '*'
+      SecurityGroupIds:
+        - !Ref CloudWatchLogsVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      SubnetIds:
+        - !Ref PrivateSubnet0
+        - !Ref PrivateSubnet1
+      VpcEndpointType: Interface
+      VpcId: !Ref Vpc
+
+  KmsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref KmsVpcEndpointSg
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.kms
+      SubnetIds:
+        - !Ref PrivateSubnet0
+        - !Ref PrivateSubnet1
+      VpcEndpointType: Interface
+      VpcId: !Ref Vpc
 
   EcrApiVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -543,6 +702,36 @@ Resources:
           ToPort: 443
           IpProtocol: tcp
       VpcId: !Ref Vpc
+
+  CloudWatchLogsVpcEndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of CloudWatch Logs VPC Endpoint
+      VpcId: !Ref Vpc
+
+  CloudWatchLogsVpcEndpointSgFromServiceSgIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref CloudWatchLogsVpcEndpointSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      SourceSecurityGroupId: !Ref ServiceSg
+
+  KmsVpcEndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of KMS VPC Endpoint
+      VpcId: !Ref Vpc
+
+  KmsVpcEndpointSgToServiceSgIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref KmsVpcEndpointSg
+      IpProtocol: tcp
+      ToPort: 443
+      FromPort: 443
+      SourceSecurityGroupId: !Ref ServiceSg
 
   DynamoDbVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint

@@ -243,6 +243,12 @@ Resources:
           Essential: true
           PortMappings:
             - ContainerPort: 8443
+          Environment:
+            - Name: ENV_NAME
+              Value: !Ref EnvName
+            - Name: KYC_TABLE
+              Value: !Ref KyTable
+
 
   TaskRole:
     Type: AWS::IAM::Role
@@ -327,14 +333,14 @@ Resources:
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
       AttributeDefinitions:
-        - AttributeName: TenantId
+        - AttributeName: ShardId
           AttributeType: S
         - AttributeName: EntityId
           AttributeType: S
       KeySchema:
-        - AttributeName: TenantId
+        - AttributeName: ShardId
           KeyType: HASH
-        - AttributeName: EntityId # A#EntityId#U || A#EntityId#T#TransactionId
+        - AttributeName: EntityId # A#EntityId#U || A#EntityId#T#TransactionId - entity can be user or organization
           KeyType: RANGE
       Tags:
         - Key: Data

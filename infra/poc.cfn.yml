@@ -53,12 +53,12 @@ Mappings:
       Cidr: 10.50.96.0/19
 
   # This is a temp facility - another key / credential service should
-  # be created
-  TenantKeys:
+  # be created with ID mapping
+  TenantIds:
     Tenant0:
-      KeyId: 15e8ab60-6e3a11ec90d60242ac120003
+      Id: 15e8ab60-6e3a11ec90d60242ac120003
     Tenant1:
-      KeyId: 2e592b34-6e3a11ec90d60242ac120003
+      Id: 2e592b34-6e3a11ec90d60242ac120003
 
 Resources:
 
@@ -285,27 +285,36 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: ddb-ky-table-write
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:DescribeTable
-                  - dynamodb:Put*
-                  - dynamodb:BatchWrite*
-                  - dynamodb:Update*
-                Resource: !GetAtt KyTable.Arn
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !GetAtt ServiceLogGroup.Arn
-
+      ManagedPolicyArns:
+        - !Ref TaskRolePolicy
       Tags:
         - Key: EnvName
           Value: !Ref EnvName
+
+  TaskRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:DescribeTable
+              - dynamodb:Put*
+              - dynamodb:BatchWrite*
+              - dynamodb:Update*
+            Resource: !GetAtt KyTable.Arn
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !GetAtt ServiceLogGroup.Arn
+          - Effect: Allow
+            Action:
+              - kms:DescribeKey
+              - kms:GetPublicKey
+            Resource: '*'
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -578,11 +587,19 @@ Resources:
       FromPort: 443
       DestinationSecurityGroupId: !Ref CloudWatchLogsVpcEndpointSg
 
+  Tenant0KmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub
+        - alias/${Id}
+        - Id: !FindInMap [ TenantIds, Tenant0, Id ]
+      TargetKeyId: !Ref Tenant0KmsKey
+
   # Temporary facility until a key/credential service is available/identified
-  Tenant0Key:
+  Tenant0KmsKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: Tenant0 Key
+      Description: !FindInMap [ TenantIds, Tenant0, Id ]
       Enabled: true
       EnableKeyRotation: false
       KeySpec: RSA_4096
@@ -607,7 +624,7 @@ Resources:
           - Sid: Encrypt Permission
             Effect: Allow
             Principal:
-              AWS: !Sub GetAtt TaskRole.Arn
+              AWS: !GetAtt TaskRole.Arn
             Action:
               - kms:DescribeKey
               - kms:GetPublicKey
@@ -615,6 +632,8 @@ Resources:
       Tags:
         - Key: Data
           Value: Red
+        - Key: TenantId
+          Value: !FindInMap [ TenantIds, Tenant0, Id ]
         - Key: EnvName
           Value: !Ref EnvName
 

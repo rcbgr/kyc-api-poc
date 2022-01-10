@@ -47,7 +47,16 @@ update-service:
 	@aws ecs update-service \
 	--profile $(PROFILE) \
 	--region $(REGION) \
-	--service ky-api-poc-$(ENV_NAME) \
+	--cluster ky-ingestion-poc-$(ENV_NAME) \
 	--service ky-ingestion-poc-$(ENV_NAME) \
 	--force-new-deployment
 
+
+.PHONY: install-protoc
+install-protoc:
+	@brew install protobuf
+	@go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+.PHONY: protoc
+protoc:
+	@protoc -I=./ --go_out=./ ./message.proto

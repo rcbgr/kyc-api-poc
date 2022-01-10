@@ -1,10 +1,20 @@
 FROM public.ecr.aws/bitnami/golang:latest as builder
 
+ARG CACHEBUST=1 
+
 RUN mkdir -p /build
 WORKDIR /build
 COPY main.go .
 COPY go.mod .
 COPY go.sum .
+COPY message.proto .
+
+RUN wget https://github.com/protocolbuffers/protobuf/releases/download/v3.19.2/protoc-3.19.2-linux-x86_64.zip && unzip protoc-3.19.2-linux-x86_64.zip -d protoc
+
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+RUN /build/protoc/bin/protoc -I=./ --go_out=./ ./message.proto
+
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
 RUN openssl genrsa -out server.key 2048

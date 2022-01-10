@@ -1,0 +1,34 @@
+syntax = "proto3";
+package main;
+
+option go_package = "protob/model";
+
+message Kyc {
+  string userId = 1;
+  string firstName = 2;
+  optional string lastName = 3;
+  string dateOfBirth = 4;
+  string kycStatus = 5;
+  string recordType = 6;
+	Address address = 7;
+	Id id = 8;
+
+}
+
+message Address {
+  string address1 = 1;
+  optional string address2 = 2;
+  optional string address3 = 3;
+  optional string address4 = 4;
+  string cityLocality = 5;
+  string stateProvinceRegion = 6;
+  string postalCode = 7;
+  string countryCode = 8;
+}
+
+message Id {
+  string type = 1;
+  string value = 2;
+  string countryCode = 3;
+}
+

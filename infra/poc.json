@@ -7,7 +7,22 @@
 
 	{ "ParameterKey": "AvailabilityZone1",
 		"ParameterValue": "us-east-1b"
-	}
+	},
 
+	{ "ParameterKey": "S3PrefixListId",
+		"ParameterValue": "pl-63a5400a"
+	},
+
+	{ "ParameterKey": "DynamoDbPrefixListId",
+		"ParameterValue": "pl-02cd2c6b"
+	},
+
+	{ "ParameterKey": "CertificateArn",
+		"ParameterValue": "arn:aws:acm:us-east-1:269118864405:certificate/b1df0e7f-6830-430e-9ea6-62f1a0c87f87"
+	},
+
+	{ "ParameterKey": "ServiceImage",
+		"ParameterValue": "269118864405.dkr.ecr.us-east-1.amazonaws.com/ky-ingestion-poc-dev:latest"
+	}
 
 ]

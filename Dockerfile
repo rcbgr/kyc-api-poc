@@ -15,7 +15,7 @@ RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 
 RUN /build/protoc/bin/protoc -I=./ --go_out=./ ./message.proto
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main main.go
 
 RUN openssl genrsa -out server.key 2048
 RUN openssl ecparam -genkey -name secp384r1 -out server.key

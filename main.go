@@ -14,8 +14,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
+	proto "github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	model "github.com/rnzsgh/kyc-api-poc/protob/model"
 	"hash/crc32"
 	"io"
 	"io/ioutil"
@@ -26,8 +28,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	proto "github.com/golang/protobuf/proto"
-	model "github.com/rnzsgh/kyc-api-poc/protob/model"
 )
 
 const shardCount = 200
@@ -83,24 +83,33 @@ type Address struct {
 	CountryCode         string `json:"countryCode"` // ISO 3166 Alpha-3 code
 }
 
+type Order struct {
+	UserId      string `json:"userId"`
+	TenantId    string `json:"tenantId"`
+
+
+}
+
+
+
 func internalKyc(v *model.Kyc) (kyc *Kyc) {
 
 	kyc = &Kyc{
-		UserId: v.UserId,
-		FirstName  : v.FirstName,
-		DateOfBirth : v.DateOfBirth,
-		RecordType  : v.RecordType,
-		KycStatus   : v.KycStatus,
-		Address     : &Address{
-			Address1: v.Address.Address1,
-			CityLocality        : v.Address.CityLocality,
-			StateProvinceRegion : v.Address.StateProvinceRegion,
-			PostalCode: v.Address.PostalCode,
-			CountryCode: v.Address.CountryCode,
+		UserId:      v.UserId,
+		FirstName:   v.FirstName,
+		DateOfBirth: v.DateOfBirth,
+		RecordType:  v.RecordType,
+		KycStatus:   v.KycStatus,
+		Address: &Address{
+			Address1:            v.Address.Address1,
+			CityLocality:        v.Address.CityLocality,
+			StateProvinceRegion: v.Address.StateProvinceRegion,
+			PostalCode:          v.Address.PostalCode,
+			CountryCode:         v.Address.CountryCode,
 		},
 		Id: &Id{
-			Type: v.Id.Type,
-			Value: v.Id.Value,
+			Type:        v.Id.Type,
+			Value:       v.Id.Value,
 			CountryCode: v.Id.CountryCode,
 		},
 	}
@@ -523,7 +532,7 @@ func getShardId(tenantId, userId string) string {
 
 	v := crc32.Checksum([]byte(userId), crc32q)
 
-	return fmt.Sprintf("%s-%d", tenantId, (v%shardCount))
+	return fmt.Sprintf("%s-%d", tenantId, (v % shardCount))
 }
 
 func newRequestId() string {
